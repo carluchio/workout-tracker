@@ -9,7 +9,7 @@ const NAV = [
   { path: '/',          label: 'Log',       icon: LogIcon },
   { path: '/dashboard', label: 'Dashboard', icon: DashIcon },
   { path: '/history',   label: 'History',   icon: HistoryIcon },
-  { path: '/library',   label: 'Library',   icon: LibIcon },
+  { path: '/library',   label: 'Ex Library', icon: LibIcon },
   { path: '/settings',  label: 'Settings',  icon: SettingsIcon },
 ]
 

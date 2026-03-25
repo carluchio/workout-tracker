@@ -8,7 +8,7 @@ const TYPE_COLOR = { Pull: 'var(--pull)', Push: 'var(--push)', Legs: 'var(--legs
 const TYPE_BG    = { Pull: 'pull-bg', Push: 'push-bg', Legs: 'legs-bg' }
 
 export default function LogPage() {
-  const [phase, setPhase]                     = useState('select')
+  const [phase, setPhase]                     = useState('select') // 'select' | 'active' | 'summary'
   const [sessionType, setSessionType]         = useState(null)
   const [sessionId, setSessionId]             = useState(null)
   const [lastSession, setLastSession]         = useState(null)
@@ -24,8 +24,12 @@ export default function LogPage() {
   const [lastSessionData, setLastSessionData] = useState({})
   const [loggingSet, setLoggingSet]           = useState(false)
   const [starting, setStarting]               = useState(false)
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false)
+  const [summary, setSummary]                 = useState(null)
+
   const startTime = useRef(null)
   const timerRef  = useRef(null)
+  const finalElapsed = useRef(0)
 
   useEffect(() => {
     const stored = localStorage.getItem('last_session')
@@ -35,13 +39,15 @@ export default function LogPage() {
   useEffect(() => {
     if (phase === 'active') {
       startTime.current = Date.now()
-      timerRef.current = setInterval(() =>
-        setElapsed(Math.floor((Date.now() - startTime.current) / 1000)), 1000)
+      timerRef.current = setInterval(() => {
+        const s = Math.floor((Date.now() - startTime.current) / 1000)
+        setElapsed(s)
+        finalElapsed.current = s
+      }, 1000)
     }
     return () => clearInterval(timerRef.current)
   }, [phase])
 
-  // Reset notes when switching divisions
   useEffect(() => { setNotesOpen(false) }, [currentDiv])
 
   const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -87,17 +93,16 @@ export default function LogPage() {
       .select().single()
     if (se) setSeIds(prev => ({ ...prev, [divIndex]: se.id }))
 
-    // Correct query: get most recent session_exercise for this exercise, then its sets
+    // Find most-recent previous session for this exercise
     const { data: seRows } = await supabase
       .from('session_exercises')
       .select('id, sessions(started_at)')
       .eq('exercise_id', exercise.id)
-      .neq('id', se?.id || 'none')           // exclude current session
-      .order('id', { ascending: false })      // latest first (proxy for date)
+      .neq('id', se?.id || 'none')
+      .order('id', { ascending: false })
       .limit(10)
 
     if (seRows?.length) {
-      // Sort by session date and grab most recent
       const sorted = seRows
         .filter(r => r.sessions?.started_at)
         .sort((a, b) => new Date(b.sessions.started_at) - new Date(a.sessions.started_at))
@@ -119,9 +124,7 @@ export default function LogPage() {
       }
     }
 
-    // No history — fall back to exercise defaults
-    setReps(exercise.default_reps?.includes('-')
-      ? parseInt(exercise.default_reps) || 8 : 8)
+    setReps(exercise.default_reps?.includes('-') ? parseInt(exercise.default_reps) || 8 : 8)
     setWeight(135)
   }
 
@@ -134,7 +137,7 @@ export default function LogPage() {
     const setNum   = existing.length + 1
     const tempId   = `opt-${Date.now()}`
 
-    // Optimistic UI
+    // Optimistic update
     setLoggedSets(prev => ({
       ...prev,
       [divIndex]: [...existing, { id: tempId, set_number: setNum, reps, weight_lbs: weight, optimistic: true }],
@@ -167,16 +170,118 @@ export default function LogPage() {
     }
   }
 
+  // Count total sets logged across all divisions
+  const totalSetsLogged = Object.values(loggedSets).reduce((sum, sets) => sum + sets.length, 0)
+
+  const requestFinish = () => {
+    if (totalSetsLogged > 0) {
+      setShowFinishConfirm(true)
+    } else {
+      finishSession()
+    }
+  }
+
   const finishSession = async () => {
     clearInterval(timerRef.current)
+    setShowFinishConfirm(false)
+
+    const finishedAt = new Date().toISOString()
     if (sessionId) {
       await supabase.from('sessions')
-        .update({ finished_at: new Date().toISOString() }).eq('id', sessionId)
+        .update({ finished_at: finishedAt }).eq('id', sessionId)
     }
-    setPhase('select'); setSessionType(null); setSessionId(null)
+
+    // Build summary data
+    const topLifts = []
+    Object.entries(loggedSets).forEach(([divIdx, sets]) => {
+      const ex = chosenExercises[Number(divIdx)]
+      if (!ex || !sets.length) return
+      const top = sets.reduce((a, b) => b.weight_lbs > a.weight_lbs ? b : a, sets[0])
+      topLifts.push({ name: ex.name, reps: top.reps, weight_lbs: top.weight_lbs })
+    })
+    topLifts.sort((a, b) => b.weight_lbs - a.weight_lbs)
+
+    setSummary({
+      sessionType,
+      durationSecs: finalElapsed.current,
+      totalSets: totalSetsLogged,
+      topLifts: topLifts.slice(0, 3),
+    })
+
+    setPhase('summary')
+    setSessionId(null)
+  }
+
+  const dismissSummary = () => {
+    setSummary(null)
+    setSessionType(null)
     setDivisions([]); setChosenExercises({}); setSeIds({})
     setLoggedSets({}); setLastSessionData({})
     setCurrentDiv(0); setElapsed(0); setReps(8); setWeight(135)
+    setPhase('select')
+  }
+
+  // ── SUMMARY SCREEN ─────────────────────────────────────────────────────────
+  if (phase === 'summary' && summary) {
+    const accent = TYPE_COLOR[summary.sessionType]
+    const mins = Math.floor(summary.durationSecs / 60)
+    const secs = summary.durationSecs % 60
+
+    return (
+      <div style={S.summaryPage} className="fade-in">
+        <div style={S.summaryInner}>
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.2em', color: 'var(--muted)', marginBottom: 8 }}>
+              SESSION COMPLETE
+            </p>
+            <h1 style={{ ...S.selectHeading, color: accent, fontSize: 60, textAlign: 'center' }}>
+              {summary.sessionType.toUpperCase()}
+            </h1>
+          </div>
+
+          {/* Stats */}
+          <div style={S.summaryStats}>
+            <div style={S.statBlock}>
+              <span style={S.statNum}>{mins}:{String(secs).padStart(2,'0')}</span>
+              <span style={S.statLbl}>Duration</span>
+            </div>
+            <div style={{ width: 1, background: 'var(--border)' }} />
+            <div style={S.statBlock}>
+              <span style={S.statNum}>{summary.totalSets}</span>
+              <span style={S.statLbl}>Total Sets</span>
+            </div>
+            <div style={{ width: 1, background: 'var(--border)' }} />
+            <div style={S.statBlock}>
+              <span style={S.statNum}>{Object.keys(loggedSets).filter(k => loggedSets[k].length > 0).length}</span>
+              <span style={S.statLbl}>Exercises</span>
+            </div>
+          </div>
+
+          {/* Top lifts */}
+          {summary.topLifts.length > 0 && (
+            <div style={S.summaryLifts}>
+              <p className="section-label" style={{ marginBottom: 10 }}>Top Lifts</p>
+              {summary.topLifts.map((lift, i) => (
+                <div key={i} style={{ ...S.summaryLift, ...(i === summary.topLifts.length - 1 ? { borderBottom: 'none', marginBottom: 0, paddingBottom: 0 } : {}) }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--muted2)', flex: 1 }}>{lift.name}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--text)' }}>
+                    {lift.weight_lbs} lbs × {lift.reps}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            className="btn btn-primary"
+            style={{ fontSize: 16, fontWeight: 700 }}
+            onClick={dismissSummary}
+          >
+            Done ✓
+          </button>
+        </div>
+      </div>
+    )
   }
 
   // ── SELECT ─────────────────────────────────────────────────────────────────
@@ -237,7 +342,7 @@ export default function LogPage() {
   }
 
   // ── ACTIVE SESSION ─────────────────────────────────────────────────────────
-  const accent         = TYPE_COLOR[sessionType]
+  const accent          = TYPE_COLOR[sessionType]
   const currentExercise = chosenExercises[currentDiv]
   const currentDivData  = divisions[currentDiv]
   const currentLogged   = loggedSets[currentDiv] || []
@@ -255,7 +360,7 @@ export default function LogPage() {
           <span style={S.elapsedBadge}>{fmt(elapsed)}</span>
         </div>
         <div style={{ flex: 1 }} />
-        <button className="btn btn-sm" style={S.finishBtn} onClick={finishSession}>
+        <button className="btn btn-sm" style={S.finishBtn} onClick={requestFinish}>
           End
         </button>
       </div>
@@ -288,7 +393,6 @@ export default function LogPage() {
 
       <div style={S.content}>
 
-        {/* Exercise chooser */}
         {!currentExercise ? (
           <div className="card fade-up">
             <p className="section-label" style={{ marginBottom: 10 }}>
@@ -297,8 +401,7 @@ export default function LogPage() {
             {currentDivData?.exercises?.length ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {currentDivData.exercises.map(ex => (
-                  <button key={ex.id} onClick={() => chooseExercise(currentDiv, ex)}
-                    style={S.exChoice}>
+                  <button key={ex.id} onClick={() => chooseExercise(currentDiv, ex)} style={S.exChoice}>
                     <span style={S.exChoiceName}>{ex.name}</span>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
                       {ex.coaching_notes
@@ -338,7 +441,7 @@ export default function LogPage() {
               {notesOpen && (
                 <div style={S.coachNote} className="fade-up">
                   {currentExercise.coaching_notes ||
-                    <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No notes — add them in Library.</span>}
+                    <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No notes — add them in Exercise Library.</span>}
                 </div>
               )}
             </div>
@@ -414,7 +517,7 @@ export default function LogPage() {
                 <button className="btn" style={{ flex: 2, background: accent, color: '#fff' }}
                   onClick={() => setCurrentDiv(d => d + 1)}>Next Division →</button>
               ) : (
-                <button className="btn btn-primary" style={{ flex: 2 }} onClick={finishSession}>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={requestFinish}>
                   Complete Session ✓
                 </button>
               )}
@@ -424,12 +527,40 @@ export default function LogPage() {
       </div>
 
       <RestTimer />
+
+      {/* ── Finish confirmation overlay ─────────────────────────────────────── */}
+      {showFinishConfirm && (
+        <div style={S.confirmOverlay} onClick={() => setShowFinishConfirm(false)}>
+          <div style={S.confirmSheet} className="fade-up" onClick={e => e.stopPropagation()}>
+            <div style={S.confirmHandle} />
+            <h3 style={{ fontFamily: 'var(--font-head)', fontSize: 24, letterSpacing: '0.04em', textAlign: 'center' }}>
+              End Session?
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5, textAlign: 'center' }}>
+              You've logged {totalSetsLogged} set{totalSetsLogged !== 1 ? 's' : ''} so far.
+              Finishing will save your session.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowFinishConfirm(false)}>
+                Keep Going
+              </button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={finishSession}>
+                Finish ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 function typeSubtitle(t) {
-  return { Pull: 'Deadlifts · Rows · Lat work · Curls', Push: 'Bench · Shoulders · Triceps · Cables', Legs: 'Squats · Hip Thrust · Lunges · Calves' }[t] || ''
+  return {
+    Pull: 'Deadlifts · Rows · Lat work · Curls',
+    Push: 'Bench · Shoulders · Triceps · Cables',
+    Legs: 'Squats · Hip Thrust · Lunges · Calves',
+  }[t] || ''
 }
 
 const S = {
@@ -442,6 +573,16 @@ const S = {
   typeBtnLabel: { fontFamily: 'var(--font-head)', fontSize: 34, letterSpacing: '0.06em' },
   typeBtnSub: { fontSize: 12, color: 'var(--muted)', fontWeight: 400 },
   lastInfo: { fontSize: 12, color: 'var(--muted)', textAlign: 'center' },
+
+  summaryPage: { minHeight: 'calc(100vh - 64px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' },
+  summaryInner: { width: '100%', display: 'flex', flexDirection: 'column', gap: 24 },
+  summaryStats: { display: 'flex', justifyContent: 'space-around', alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 16px' },
+  statBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 },
+  statNum: { fontFamily: 'var(--font-mono)', fontSize: 28, color: 'var(--text)', fontWeight: 500 },
+  statLbl: { fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase' },
+  summaryLifts: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 16px' },
+  summaryLift: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--border)' },
+
   activePage: { display: 'flex', flexDirection: 'column', gap: 0, minHeight: 'calc(100vh - 64px)' },
   topBar: { display: 'flex', alignItems: 'center', padding: '20px 16px 10px', gap: 10 },
   sessionTag: { fontFamily: 'var(--font-head)', fontSize: 26, letterSpacing: '0.06em', display: 'block', lineHeight: 1 },
@@ -470,4 +611,8 @@ const S = {
   inputRow: { display: 'flex', gap: 12 },
   inputGroup: { flex: 1, display: 'flex', flexDirection: 'column' },
   divNav: { display: 'flex', gap: 10, marginTop: 4 },
+
+  confirmOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' },
+  confirmSheet: { background: 'var(--surface)', borderRadius: '20px 20px 0 0', border: '1px solid var(--border)', borderBottom: 'none', padding: '16px 24px 40px', width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 16 },
+  confirmHandle: { width: 36, height: 4, borderRadius: 2, background: 'var(--border)', margin: '0 auto 8px', flexShrink: 0 },
 }
