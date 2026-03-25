@@ -1,0 +1,261 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0a0a0a;
+  --surface:   #141414;
+  --surface2:  #1e1e1e;
+  --surface3:  #2a2a2a;
+  --border:    #2e2e2e;
+  --pull:      #3b82f6;
+  --pull-dim:  #1e3a5f;
+  --push:      #a855f7;
+  --push-dim:  #3b1f5e;
+  --legs:      #22c55e;
+  --legs-dim:  #14432a;
+  --gold:      #eab308;
+  --gold-dim:  #3d2f00;
+  --text:      #f0f0f0;
+  --muted:     #6b7280;
+  --muted2:    #9ca3af;
+  --danger:    #ef4444;
+  --radius:    12px;
+  --radius-lg: 20px;
+  --font-head: 'Bebas Neue', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bot: env(safe-area-inset-bottom, 0px);
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* App shell */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.page-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: calc(72px + var(--safe-bot));
+  padding-top: var(--safe-top);
+}
+
+/* Bottom nav */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  height: calc(64px + var(--safe-bot));
+  padding-bottom: var(--safe-bot);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 100;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-item.active { color: var(--text); }
+.nav-item svg { width: 22px; height: 22px; }
+.nav-item span { font-size: 10px; font-family: var(--font-body); font-weight: 500; letter-spacing: 0.05em; }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 10px;
+  border: none;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(0.97); opacity: 0.85; }
+.btn-primary { background: var(--text); color: var(--bg); }
+.btn-ghost { background: var(--surface2); color: var(--text); }
+.btn-danger { background: var(--danger); color: white; }
+.btn-full { width: 100%; }
+.btn-sm { padding: 8px 14px; font-size: 13px; border-radius: 8px; }
+
+/* Pill */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Type accent colors */
+.pull-color { color: var(--pull); }
+.push-color { color: var(--push); }
+.legs-color { color: var(--legs); }
+.pull-bg { background: var(--pull-dim); color: var(--pull); }
+.push-bg { background: var(--push-dim); color: var(--push); }
+.legs-bg { background: var(--legs-dim); color: var(--legs); }
+
+/* Input */
+.input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input:focus { border-color: var(--muted2); }
+.input::placeholder { color: var(--muted); }
+
+textarea.input { resize: none; min-height: 80px; }
+
+/* Divider */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+
+/* Section header */
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+/* Number stepper */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.stepper-btn {
+  width: 40px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--muted2);
+  font-size: 20px;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.stepper-btn:active { background: var(--surface3); color: var(--text); }
+.stepper-value {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+  padding: 0 4px;
+  min-width: 48px;
+}
+
+/* Fade-in */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.25s ease forwards; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fadeIn 0.2s ease forwards; }
+
+/* Slide up sheet */
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* PR gold glow */
+.pr-glow {
+  color: var(--gold);
+  text-shadow: 0 0 20px rgba(234,179,8,0.4);
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--muted);
+}
+.empty-state h3 { font-size: 16px; margin-bottom: 8px; color: var(--muted2); }
+.empty-state p  { font-size: 14px; line-height: 1.5; }
+
+/* Grain overlay */
+.grain::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0.35;
+}
