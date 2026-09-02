@@ -87,7 +87,18 @@ create index if not exists sets_se_idx
   on sets (session_exercise_id, set_number);
 
 
--- ── 7. RLS (single-user app — permissive, matching your existing tables) ────
+-- ── 7. Tidy exercise names ──────────────────────────────────────────────────
+-- Three names carry a trailing space ("BB Squats ", "Back Extensions ",
+-- "Bent BB Lying Tricep Extensions "). Nothing joins on the name — every
+-- reference is by UUID — so this only affects sorting, search and display.
+-- No records are merged: these are single exercises, not duplicates.
+
+update exercises
+set name = btrim(name)
+where name <> btrim(name);
+
+
+-- ── 8. RLS (single-user app — permissive, matching your existing tables) ────
 alter table splits         enable row level security;
 alter table exercise_notes enable row level security;
 alter table app_config     enable row level security;

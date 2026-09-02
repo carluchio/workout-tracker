@@ -113,7 +113,7 @@ export default function LibraryPage() {
     const { data, error } = await supabase
       .from('exercises')
       .update({
-        name: editDraft.name,
+        name: editDraft.name.trim(),
         muscle_group: editDraft.muscle_group,
         coaching_notes: editDraft.coaching_notes,
         default_sets: editDraft.default_sets,
@@ -136,7 +136,9 @@ export default function LibraryPage() {
     if (!newEx.name.trim()) return
     const { data } = await supabase
       .from('exercises')
-      .insert(newEx)
+      // Trim on the way in — stray whitespace only ever shows up as odd
+      // sorting and search misses later.
+      .insert({ ...newEx, name: newEx.name.trim() })
       .select()
       .single()
     if (data) {
