@@ -22,6 +22,12 @@ export default function LibraryPage() {
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState(null) // exercise id
 
+  // Your own note log for the selected exercise
+  const [notes, setNotes] = useState([])
+  const [noteDraft, setNoteDraft] = useState('')
+  const [savingNote, setSavingNote] = useState(false)
+  const [showOlderNotes, setShowOlderNotes] = useState(false)
+
   useEffect(() => { loadExercises() }, [])
 
   const loadExercises = async () => {
@@ -39,7 +45,40 @@ export default function LibraryPage() {
     setSelected(ex)
     setEditingSelected(false)
     setEditDraft(null)
-    await fetchHistory(ex)
+    setNoteDraft('')
+    setShowOlderNotes(false)
+    setNotes([])
+    await Promise.all([fetchHistory(ex), fetchNotes(ex)])
+  }
+
+  const fetchNotes = async (ex) => {
+    const { data, error } = await supabase
+      .from('exercise_notes')
+      .select('id, body, created_at')
+      .eq('exercise_id', ex.id)
+      .order('created_at', { ascending: false })
+      .limit(25)
+    // Table only exists after migration-002; absence is not an error here.
+    setNotes(error ? [] : (data || []))
+  }
+
+  const saveNote = async () => {
+    if (!noteDraft.trim() || savingNote) return
+    setSavingNote(true)
+    const { data } = await supabase
+      .from('exercise_notes')
+      .insert({ exercise_id: selected.id, body: noteDraft.trim() })
+      .select().single()
+    if (data) {
+      setNotes(prev => [data, ...prev])
+      setNoteDraft('')
+    }
+    setSavingNote(false)
+  }
+
+  const deleteNote = async (id) => {
+    setNotes(prev => prev.filter(n => n.id !== id))
+    await supabase.from('exercise_notes').delete().eq('id', id)
   }
 
   const fetchHistory = async (ex) => {
@@ -306,6 +345,61 @@ export default function LibraryPage() {
                   </p>
                 )}
 
+                {/* My notes — the running log you add to during a workout. */}
+                <div>
+                  <p className="section-label" style={{ marginBottom: 8 }}>
+                    My Notes {notes.length > 0 && `(${notes.length})`}
+                  </p>
+                  {notes.length === 0 ? (
+                    <p style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', marginBottom: 8 }}>
+                      Nothing yet. Notes you add here or mid-workout show up next time.
+                    </p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+                      {(showOlderNotes ? notes : notes.slice(0, 1)).map((n, i) => (
+                        <div
+                          key={n.id}
+                          className="note-card"
+                          style={i > 0 ? { borderLeftColor: 'var(--border)', opacity: 0.8 } : undefined}
+                        >
+                          <span className="note-meta">
+                            {format(new Date(n.created_at), 'MMM d, yyyy').toUpperCase()}
+                          </span>
+                          {n.body}
+                          <button
+                            style={{ float: 'right', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, cursor: 'pointer', lineHeight: 1, marginLeft: 8 }}
+                            onClick={() => deleteNote(n.id)}
+                            aria-label="Delete note"
+                          >×</button>
+                        </div>
+                      ))}
+                      {notes.length > 1 && (
+                        <button
+                          style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 11, cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', padding: 0 }}
+                          onClick={() => setShowOlderNotes(o => !o)}
+                        >
+                          {showOlderNotes ? 'Hide older notes' : `Show ${notes.length - 1} older note${notes.length - 1 > 1 ? 's' : ''}`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <textarea
+                    className="input"
+                    placeholder="Add a note…"
+                    value={noteDraft}
+                    onChange={e => setNoteDraft(e.target.value)}
+                    style={{ minHeight: 56, fontSize: 14 }}
+                  />
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    style={{ marginTop: 8, opacity: noteDraft.trim() ? 1 : 0.4 }}
+                    onClick={saveNote}
+                    disabled={!noteDraft.trim() || savingNote}
+                  >
+                    {savingNote ? 'Saving…' : 'Save note'}
+                  </button>
+                </div>
+
                 {/* Defaults row */}
                 <div style={{ display: 'flex', gap: 16 }}>
                   <div>
@@ -358,7 +452,7 @@ export default function LibraryPage() {
       {/* ── Add exercise sheet ─────────────────────────────────────────────── */}
       {addOpen && (
         <div style={styles.overlay} onClick={e => e.target === e.currentTarget && setAddOpen(false)}>
-          <div style={{ ...styles.sheet, maxHeight: '85vh' }} className="fade-up">
+          <div style={{ ...styles.sheet, maxHeight: 'calc(100dvh - 40px)' }} className="fade-up">
             <div style={styles.sheetHandle} />
             <h2 style={styles.sheetTitle}>New Exercise</h2>
 
@@ -572,11 +666,14 @@ const styles = {
     color: 'var(--muted2)',
     fontFamily: 'var(--font-mono)',
   },
+  // 100dvh, not 100vh: on mobile 100vh measures the viewport behind the
+  // browser chrome, which is what pushed sheet buttons below the fold.
   overlay: {
     position: 'fixed',
     inset: 0,
+    height: '100dvh',
     background: 'rgba(0,0,0,0.75)',
-    zIndex: 200,
+    zIndex: 300,
     display: 'flex',
     alignItems: 'flex-end',
     justifyContent: 'center',
@@ -586,10 +683,11 @@ const styles = {
     borderRadius: '20px 20px 0 0',
     border: '1px solid var(--border)',
     borderBottom: 'none',
-    padding: '16px 20px 40px',
+    padding: '16px 20px calc(24px + var(--safe-bot))',
     width: '100%',
     maxWidth: 480,
-    maxHeight: '90vh',
+    maxHeight: 'calc(100dvh - 40px)',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: 16,

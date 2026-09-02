@@ -4,18 +4,35 @@ import DashboardPage from './pages/DashboardPage.jsx'
 import HistoryPage from './pages/HistoryPage.jsx'
 import LibraryPage from './pages/LibraryPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
+import RestTimer from './components/RestTimer.jsx'
+import { WorkoutProvider, useWorkout } from './store/workout.jsx'
+import { RestTimerProvider } from './store/restTimer.jsx'
 
 const NAV = [
-  { path: '/',          label: 'Log',       icon: LogIcon },
-  { path: '/dashboard', label: 'Dashboard', icon: DashIcon },
-  { path: '/history',   label: 'History',   icon: HistoryIcon },
+  { path: '/',          label: 'Log',        icon: LogIcon },
+  { path: '/dashboard', label: 'Dashboard',  icon: DashIcon },
+  { path: '/history',   label: 'History',    icon: HistoryIcon },
   { path: '/library',   label: 'Ex Library', icon: LibIcon },
-  { path: '/settings',  label: 'Settings',  icon: SettingsIcon },
+  { path: '/settings',  label: 'Settings',   icon: SettingsIcon },
 ]
 
+// Session state lives above the router, so switching to History or the Exercise
+// Library no longer unmounts the workout. Both providers wrap the shell.
 export default function App() {
+  return (
+    <WorkoutProvider>
+      <RestTimerProvider>
+        <Shell />
+      </RestTimerProvider>
+    </WorkoutProvider>
+  )
+}
+
+function Shell() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { phase, split } = useWorkout()
+  const sessionLive = phase === 'active'
 
   return (
     <div className="app-shell grain">
@@ -30,17 +47,35 @@ export default function App() {
       </div>
 
       <nav className="bottom-nav">
-        {NAV.map(({ path, label, icon: Icon }) => (
-          <button
-            key={path}
-            className={`nav-item ${location.pathname === path ? 'active' : ''}`}
-            onClick={() => navigate(path)}
-          >
-            <Icon active={location.pathname === path} />
-            <span>{label}</span>
-          </button>
-        ))}
+        {NAV.map(({ path, label, icon: Icon }) => {
+          const active = location.pathname === path
+          return (
+            <button
+              key={path}
+              className={`nav-item ${active ? 'active' : ''}`}
+              onClick={() => navigate(path)}
+            >
+              <span style={{ position: 'relative', display: 'flex' }}>
+                <Icon active={active} />
+                {/* A live session is now survivable, so say so. */}
+                {path === '/' && sessionLive && (
+                  <span
+                    style={{
+                      position: 'absolute', top: -2, right: -4,
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: split?.color || 'var(--legs)',
+                      boxShadow: '0 0 0 2px var(--surface)',
+                    }}
+                  />
+                )}
+              </span>
+              <span>{label}</span>
+            </button>
+          )
+        })}
       </nav>
+
+      <RestTimer />
     </div>
   )
 }

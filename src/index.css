@@ -29,6 +29,7 @@
 
 html, body, #root {
   height: 100%;
+  height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
@@ -190,8 +191,8 @@ textarea.input { resize: none; min-height: 80px; }
   overflow: hidden;
 }
 .stepper-btn {
-  width: 40px;
-  height: 44px;
+  width: 46px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -258,4 +259,230 @@ textarea.input { resize: none; min-height: 80px; }
   pointer-events: none;
   z-index: 999;
   opacity: 0.35;
+}
+
+/* ── Bottom sheets ─────────────────────────────────────────────────────────
+   One shared implementation. The old per-sheet padding used 100vh, which on
+   mobile measures the viewport *behind* the browser chrome — that is why the
+   End Session confirm button sat below the fold. 100dvh plus a scrollable
+   body keeps the primary action reachable at any viewport height.          */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 300;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: fadeIn 0.18s ease forwards;
+}
+
+.sheet {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100dvh - 40px);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 24px calc(24px + var(--safe-bot));
+  box-sizing: border-box;
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 0 auto 12px;
+  flex-shrink: 0;
+}
+
+/* The body scrolls; the sheet itself never grows past the visible viewport,
+   so footer buttons are always on screen. */
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sheet-title {
+  font-family: var(--font-head);
+  font-size: 26px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+/* ── Rest timer pill ───────────────────────────────────────────────────────
+   Sits above the bottom nav, right-aligned. Legible at arm's length while
+   you are mid-set rather than a 9px badge on a circle.                     */
+.rest-pill {
+  position: fixed;
+  bottom: calc(64px + 16px + var(--safe-bot));
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 8px;
+  border-radius: 26px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted2);
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.2s, background 0.2s, transform 0.1s;
+}
+.rest-pill:active { transform: scale(0.96); }
+.rest-pill.is-running {
+  padding: 0 18px 0 8px;
+  border-color: color-mix(in srgb, var(--pill-accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--pill-accent) 12%, var(--surface2));
+}
+
+.rest-pill-time {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--pill-accent);
+  line-height: 1;
+}
+
+.rest-pill.is-urgent { animation: pillPulse 1s ease-in-out infinite; }
+.rest-pill.is-done {
+  animation: pillPulse 0.7s ease-in-out infinite;
+  border-color: var(--legs);
+  background: color-mix(in srgb, var(--legs) 20%, var(--surface2));
+}
+
+@keyframes pillPulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); }
+  50%      { box-shadow: 0 4px 28px color-mix(in srgb, var(--pill-accent) 55%, transparent); }
+}
+
+/* ── Stepper scrub affordance ──────────────────────────────────────────── */
+.stepper-scrub {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: ew-resize;
+  touch-action: none;          /* drag scrubs instead of scrolling the page */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.scrub-hint {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.5;
+  font-family: var(--font-body);
+}
+
+/* ── Toggle row ────────────────────────────────────────────────────────── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.toggle-row > span {
+  font-size: 14px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+}
+.toggle-row em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.toggle-row input[type='checkbox'] {
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface3);
+  border-radius: 13px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.toggle-row input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--muted2);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s;
+}
+.toggle-row input[type='checkbox']:checked { background: var(--legs-dim); }
+.toggle-row input[type='checkbox']:checked::after {
+  transform: translateX(18px);
+  background: var(--legs);
+}
+
+/* ── Notes ─────────────────────────────────────────────────────────────── */
+.note-card {
+  background: var(--surface2);
+  border-radius: 8px;
+  border-left: 3px solid var(--gold);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--muted2);
+  line-height: 1.55;
+}
+.note-meta {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+/* ── Banner ────────────────────────────────────────────────────────────── */
+.banner {
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid;
+}
+.banner-warn {
+  background: color-mix(in srgb, var(--gold) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--gold) 40%, var(--border));
+  color: var(--muted2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

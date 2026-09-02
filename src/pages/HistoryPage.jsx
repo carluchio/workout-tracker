@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { format, formatDistanceToNow } from 'date-fns'
+import { fetchSplits } from '../lib/config.js'
 
-const SESSION_TYPES = ['Pull', 'Push', 'Legs']
-const TYPE_COLOR = { Pull: 'var(--pull)', Push: 'var(--push)', Legs: 'var(--legs)' }
-const TYPE_BG    = { Pull: 'pull-bg',     Push: 'push-bg',     Legs: 'legs-bg' }
+// Muscle groups on the PR board are still a fixed vocabulary (they come from
+// the exercise library); split names are not, so they load from the DB.
+const GROUP_COLOR = { Pull: 'var(--pull)', Push: 'var(--push)', Legs: 'var(--legs)' }
 
 const toLocalInput = (iso) => {
   if (!iso) return ''
@@ -17,6 +18,7 @@ export default function HistoryPage() {
   const [tab, setTab] = useState('history')
   const [sessions, setSessions] = useState([])
   const [prs, setPrs] = useState([])
+  const [prSearch, setPrSearch] = useState('')
   const [expanded, setExpanded] = useState(null)
   const [sessionDetail, setSessionDetail] = useState({})
   const [loading, setLoading] = useState(true)
@@ -31,18 +33,27 @@ export default function HistoryPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [addSaving, setAddSaving] = useState(false)
   const [addForm, setAddForm] = useState({
-    session_type: 'Pull',
+    session_type: '',
     started_at: toLocalInput(new Date().toISOString()),
     notes: '',
     exercises: [], // [{exercise_id, exercise_name, sets: [{reps:'', weight_lbs:''}]}]
   })
   const [allExercises, setAllExercises] = useState([])
+  const [splits, setSplits] = useState([])
 
   useEffect(() => {
     supabase.from('exercises').select('id, name, muscle_group')
       .eq('is_archived', false).order('name')
       .then(({ data }) => setAllExercises(data || []))
+    fetchSplits().then(({ splits }) => {
+      setSplits(splits)
+      setAddForm(f => (f.session_type ? f : { ...f, session_type: splits[0]?.name || '' }))
+    })
   }, [])
+
+  // A session's split may since have been renamed, archived, or predate the
+  // splits table entirely — always fall back rather than render a blank chip.
+  const colorOf = (name) => splits.find(s => s.name === name)?.color || 'var(--muted2)'
 
   useEffect(() => {
     tab === 'history' ? loadHistory() : loadPRs()
@@ -65,7 +76,27 @@ export default function HistoryPage() {
       .from('personal_records')
       .select('*')
       .order('pr_weight', { ascending: false })
-    if (!error) setPrs(data || [])
+
+    // The personal_records view emits one row per set matching the max weight,
+    // so every time you repeat a PR it lists again. Collapse to one row per
+    // exercise: best weight, then most reps at that weight, then the date it
+    // was first hit.
+    if (!error) {
+      const best = new Map()
+      ;(data || []).forEach(pr => {
+        const key = pr.exercise_id ?? pr.exercise_name
+        const held = best.get(key)
+        if (
+          !held ||
+          Number(pr.pr_weight) > Number(held.pr_weight) ||
+          (Number(pr.pr_weight) === Number(held.pr_weight) &&
+            (Number(pr.pr_reps) > Number(held.pr_reps) ||
+              (Number(pr.pr_reps) === Number(held.pr_reps) &&
+                new Date(pr.achieved_at) < new Date(held.achieved_at))))
+        ) best.set(key, pr)
+      })
+      setPrs([...best.values()].sort((a, b) => Number(b.pr_weight) - Number(a.pr_weight)))
+    }
     setLoading(false)
   }
 
@@ -84,7 +115,11 @@ export default function HistoryPage() {
       .eq('session_id', sessionId)
       .order('division_number')
 
-    setSessionDetail(prev => ({ ...prev, [sessionId]: data || [] }))
+    // Hide exercises with no sets. Older sessions can still contain rows left
+    // behind by the previous "pick an exercise writes a row immediately"
+    // behaviour — those are the phantom duplicates. migration-002.sql deletes
+    // them for good; this keeps the display honest either way.
+    setSessionDetail(prev => ({ ...prev, [sessionId]: (data || []).filter(se => se.sets?.length) }))
     setExpanded(sessionId)
   }
 
@@ -210,7 +245,7 @@ export default function HistoryPage() {
         }
       }
       setAddOpen(false)
-      setAddForm({ session_type: 'Pull', started_at: toLocalInput(new Date().toISOString()), notes: '', exercises: [] })
+      setAddForm({ session_type: splits[0]?.name || '', started_at: toLocalInput(new Date().toISOString()), notes: '', exercises: [] })
       loadHistory()
     }
     setAddSaving(false)
@@ -221,6 +256,22 @@ export default function HistoryPage() {
     const mins = Math.round((new Date(end) - new Date(start)) / 60000)
     return `${mins}m`
   }
+
+  const prQuery = prSearch.trim().toLowerCase()
+  const filteredPrs = prQuery
+    ? prs.filter(p =>
+        (p.exercise_name || '').toLowerCase().includes(prQuery) ||
+        (p.muscle_group || '').toLowerCase().includes(prQuery))
+    : prs
+
+  // Derive groups from the data rather than a fixed list, so a PR filed under
+  // an unexpected muscle group is never silently dropped from the board.
+  const prGroups = [...new Set(filteredPrs.map(p => p.muscle_group || 'Other'))]
+    .sort((a, b) => {
+      const order = ['Pull', 'Push', 'Legs', 'Core', 'Other']
+      const ia = order.indexOf(a), ib = order.indexOf(b)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b)
+    })
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
@@ -259,7 +310,15 @@ export default function HistoryPage() {
             <div key={sess.id} className="card" style={styles.sessionCard}>
               <button style={styles.sessionRow} onClick={() => loadSessionDetail(sess.id)}>
                 <div style={styles.sessionLeft}>
-                  <span className={`pill ${TYPE_BG[sess.session_type]}`}>{sess.session_type}</span>
+                  <span
+                    className="pill"
+                    style={{
+                      background: `color-mix(in srgb, ${colorOf(sess.session_type)} 22%, transparent)`,
+                      color: colorOf(sess.session_type),
+                    }}
+                  >
+                    {sess.session_type}
+                  </span>
                   <div>
                     <p style={styles.sessionDate}>{format(new Date(sess.started_at), 'EEE MMM d, yyyy')}</p>
                     <p style={styles.sessionMeta}>
@@ -321,18 +380,36 @@ export default function HistoryPage() {
         </div>
       ) : (
         <div style={styles.list}>
+          {prs.length > 0 && (
+            <input
+              className="input"
+              placeholder="Search PRs by exercise or muscle group…"
+              value={prSearch}
+              onChange={e => setPrSearch(e.target.value)}
+              style={{ marginBottom: 4 }}
+            />
+          )}
+
           {!prs.length && (
             <div className="empty-state">
               <h3>No PRs recorded yet</h3>
               <p>Log sets to build your personal record board.</p>
             </div>
           )}
-          {['Pull', 'Push', 'Legs', 'Core', 'Other'].map(group => {
-            const groupPRs = prs.filter(p => p.muscle_group === group)
+
+          {prs.length > 0 && !filteredPrs.length && (
+            <div className="empty-state">
+              <h3>No matches</h3>
+              <p>Nothing in your PR board matches “{prSearch}”.</p>
+            </div>
+          )}
+
+          {prGroups.map(group => {
+            const groupPRs = filteredPrs.filter(p => (p.muscle_group || 'Other') === group)
             if (!groupPRs.length) return null
             return (
               <div key={group}>
-                <p className="section-label" style={{ color: TYPE_COLOR[group] || 'var(--muted)', marginTop: 12 }}>
+                <p className="section-label" style={{ color: GROUP_COLOR[group] || 'var(--muted)', marginTop: 12 }}>
                   {group}
                 </p>
                 {groupPRs.map((pr, i) => (
@@ -383,7 +460,7 @@ export default function HistoryPage() {
       {/* ── Edit session overlay ────────────────────────────────────────────── */}
       {editSession && (
         <div style={styles.overlay} onClick={() => setEditSession(null)}>
-          <div style={{ ...styles.sheet, maxHeight: '70vh' }} className="fade-up" onClick={e => e.stopPropagation()}>
+          <div style={{ ...styles.sheet, maxHeight: 'calc(100dvh - 40px)' }} className="fade-up" onClick={e => e.stopPropagation()}>
             <div style={styles.sheetHandle} />
             <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 26, letterSpacing: '0.04em' }}>Edit Session</h2>
 
@@ -391,20 +468,20 @@ export default function HistoryPage() {
               <div>
                 <p className="section-label" style={{ marginBottom: 6 }}>Session Type</p>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {SESSION_TYPES.map(t => (
+                  {splits.map(sp => (
                     <button
-                      key={t}
-                      onClick={() => setEditSession(s => ({ ...s, session_type: t }))}
+                      key={sp.id}
+                      onClick={() => setEditSession(s => ({ ...s, session_type: sp.name }))}
                       style={{
-                        flex: 1, padding: '8px', borderRadius: 8, border: '1px solid',
-                        borderColor: editSession.session_type === t ? TYPE_COLOR[t] : 'var(--border)',
-                        color: editSession.session_type === t ? TYPE_COLOR[t] : 'var(--muted)',
-                        background: editSession.session_type === t
-                          ? `color-mix(in srgb, ${TYPE_COLOR[t]} 10%, var(--surface2))`
+                        flex: '1 1 auto', padding: '8px', borderRadius: 8, border: '1px solid',
+                        borderColor: editSession.session_type === sp.name ? sp.color : 'var(--border)',
+                        color: editSession.session_type === sp.name ? sp.color : 'var(--muted)',
+                        background: editSession.session_type === sp.name
+                          ? `color-mix(in srgb, ${sp.color} 10%, var(--surface2))`
                           : 'var(--surface2)',
                         cursor: 'pointer', fontWeight: 700, fontSize: 13,
                       }}
-                    >{t}</button>
+                    >{sp.name}</button>
                   ))}
                 </div>
               </div>
@@ -443,7 +520,7 @@ export default function HistoryPage() {
       {/* ── Add session overlay ─────────────────────────────────────────────── */}
       {addOpen && (
         <div style={styles.overlay} onClick={() => setAddOpen(false)}>
-          <div style={{ ...styles.sheet, maxHeight: '92vh' }} className="fade-up" onClick={e => e.stopPropagation()}>
+          <div style={{ ...styles.sheet, maxHeight: 'calc(100dvh - 40px)' }} className="fade-up" onClick={e => e.stopPropagation()}>
             <div style={styles.sheetHandle} />
             <h2 style={{ fontFamily: 'var(--font-head)', fontSize: 26, letterSpacing: '0.04em' }}>Add Past Session</h2>
 
@@ -452,20 +529,20 @@ export default function HistoryPage() {
               <div>
                 <p className="section-label" style={{ marginBottom: 6 }}>Session Type</p>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {SESSION_TYPES.map(t => (
+                  {splits.map(sp => (
                     <button
-                      key={t}
-                      onClick={() => setAddForm(f => ({ ...f, session_type: t }))}
+                      key={sp.id}
+                      onClick={() => setAddForm(f => ({ ...f, session_type: sp.name }))}
                       style={{
-                        flex: 1, padding: '8px', borderRadius: 8, border: '1px solid',
-                        borderColor: addForm.session_type === t ? TYPE_COLOR[t] : 'var(--border)',
-                        color: addForm.session_type === t ? TYPE_COLOR[t] : 'var(--muted)',
-                        background: addForm.session_type === t
-                          ? `color-mix(in srgb, ${TYPE_COLOR[t]} 10%, var(--surface2))`
+                        flex: '1 1 auto', padding: '8px', borderRadius: 8, border: '1px solid',
+                        borderColor: addForm.session_type === sp.name ? sp.color : 'var(--border)',
+                        color: addForm.session_type === sp.name ? sp.color : 'var(--muted)',
+                        background: addForm.session_type === sp.name
+                          ? `color-mix(in srgb, ${sp.color} 10%, var(--surface2))`
                           : 'var(--surface2)',
                         cursor: 'pointer', fontWeight: 700, fontSize: 13,
                       }}
-                    >{t}</button>
+                    >{sp.name}</button>
                   ))}
                 </div>
               </div>
@@ -711,11 +788,14 @@ const styles = {
   prUnit: { fontSize: 11, color: 'var(--muted)' },
   prX: { fontSize: 12, color: 'var(--muted)', margin: '0 2px' },
   prReps: { fontFamily: 'var(--font-mono)', fontSize: 16, color: 'var(--muted2)' },
+  // 100dvh, not 100vh: on mobile 100vh measures the viewport behind the
+  // browser chrome, which is what pushed sheet buttons below the fold.
   overlay: {
     position: 'fixed',
     inset: 0,
+    height: '100dvh',
     background: 'rgba(0,0,0,0.75)',
-    zIndex: 200,
+    zIndex: 300,
     display: 'flex',
     alignItems: 'flex-end',
     justifyContent: 'center',
@@ -725,9 +805,11 @@ const styles = {
     borderRadius: '20px 20px 0 0',
     border: '1px solid var(--border)',
     borderBottom: 'none',
-    padding: '16px 20px 40px',
+    padding: '16px 20px calc(24px + var(--safe-bot))',
     width: '100%',
     maxWidth: 480,
+    maxHeight: 'calc(100dvh - 40px)',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: 16,
@@ -738,12 +820,15 @@ const styles = {
     borderRadius: '20px 20px 0 0',
     border: '1px solid var(--border)',
     borderBottom: 'none',
-    padding: '16px 20px 40px',
+    padding: '16px 20px calc(24px + var(--safe-bot))',
     width: '100%',
     maxWidth: 480,
+    maxHeight: 'calc(100dvh - 40px)',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: 16,
+    overflowY: 'auto',
   },
   sheetHandle: {
     width: 36,

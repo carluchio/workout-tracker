@@ -3,3 +3,8 @@ dist
 .env
 .env.local
 .DS_Store
+
+# Local tooling / personal notes — not part of the app
+.claude/
+GLOBAL_CLAUDE.md
+*.docx

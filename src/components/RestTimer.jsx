@@ -1,109 +1,120 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
+import { useRestTimer } from '../store/restTimer.jsx'
+import { useWorkout } from '../store/workout.jsx'
+
+const PRESETS = [45, 60, 90, 120, 180]
+const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 export default function RestTimer() {
+  const t = useRestTimer()
+  const { phase, split } = useWorkout()
   const [open, setOpen] = useState(false)
-  const [duration, setDuration] = useState(60)
-  const [remaining, setRemaining] = useState(60)
-  const [running, setRunning] = useState(false)
-  const intervalRef = useRef(null)
 
-  useEffect(() => {
-    if (running) {
-      intervalRef.current = setInterval(() => {
-        setRemaining(r => {
-          if (r <= 1) {
-            setRunning(false)
-            clearInterval(intervalRef.current)
-            // haptic if available
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200])
-            return 0
-          }
-          return r - 1
-        })
-      }, 1000)
-    }
-    return () => clearInterval(intervalRef.current)
-  }, [running])
+  const workoutActive = phase === 'active'
+  // Stay out of the way entirely when there's nothing to time.
+  if (!workoutActive && !t.running && !open) return null
 
-  const startPause = () => {
-    if (remaining === 0) {
-      setRemaining(duration)
-      setRunning(true)
-    } else {
-      setRunning(r => !r)
-    }
-  }
+  const accent = split?.color || 'var(--pull)'
+  const nearlyDone = t.running && t.remaining <= 10 && t.remaining > 0
+  const color = t.finished ? 'var(--legs)' : nearlyDone ? 'var(--gold)' : accent
 
-  const adjust = (delta) => {
-    const next = Math.max(15, duration + delta)
-    setDuration(next)
-    if (!running) setRemaining(next)
-  }
-
-  const reset = () => {
-    setRunning(false)
-    setRemaining(duration)
-  }
-
-  const pct = remaining / duration
-  const r = 44
-  const circ = 2 * Math.PI * r
-  const offset = circ * (1 - pct)
-
-  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  // Ring geometry for the minimised pill.
+  const R = 13
+  const CIRC = 2 * Math.PI * R
+  const pct = t.duration > 0 ? Math.min(1, t.remaining / t.duration) : 0
 
   return (
     <>
-      {/* Floating trigger */}
-      <button onClick={() => setOpen(true)} style={styles.fab} aria-label="Rest timer">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 3" />
+      {/* ── Minimised: a legible countdown, not a 9px badge ─────────────── */}
+      <button
+        onClick={() => setOpen(true)}
+        className={`rest-pill ${t.running ? 'is-running' : ''} ${t.finished ? 'is-done' : ''} ${nearlyDone ? 'is-urgent' : ''}`}
+        style={{ '--pill-accent': color }}
+        aria-label={t.running ? `Rest timer, ${fmt(t.remaining)} remaining` : 'Rest timer'}
+      >
+        <svg width="32" height="32" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
+          <circle cx="16" cy="16" r={R} fill="none" stroke="var(--surface3)" strokeWidth="3" />
+          {t.running && (
+            <circle
+              cx="16" cy="16" r={R} fill="none"
+              stroke={color} strokeWidth="3" strokeLinecap="round"
+              strokeDasharray={CIRC}
+              strokeDashoffset={CIRC * (1 - pct)}
+              transform="rotate(-90 16 16)"
+              style={{ transition: 'stroke-dashoffset 0.25s linear, stroke 0.3s' }}
+            />
+          )}
+          {!t.running && (
+            <g stroke="var(--muted2)" strokeWidth="2" strokeLinecap="round" fill="none">
+              <path d="M16 10v6l4 3" />
+            </g>
+          )}
         </svg>
-        {running && <span style={styles.fabBadge}>{fmt(remaining)}</span>}
+
+        {t.running && (
+          <span className="rest-pill-time">{t.finished ? 'GO' : fmt(t.remaining)}</span>
+        )}
       </button>
 
-      {/* Overlay */}
+      {/* ── Expanded sheet ──────────────────────────────────────────────── */}
       {open && (
-        <div style={styles.overlay} onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
-          <div style={styles.sheet} className="fade-up">
-            <div style={styles.handle} />
-            <p style={styles.title}>Rest Timer</p>
+        <div className="sheet-overlay" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle" />
+            <div className="sheet-body" style={{ alignItems: 'center', gap: 20 }}>
+              <p style={{ fontFamily: 'var(--font-head)', fontSize: 22, letterSpacing: '0.06em' }}>
+                Rest Timer
+              </p>
 
-            {/* Ring */}
-            <div style={styles.ringWrap}>
-              <svg width="120" height="120" style={{ transform: 'rotate(-90deg)' }}>
-                <circle cx="60" cy="60" r={r} fill="none" stroke="var(--surface3)" strokeWidth="6" />
-                <circle
-                  cx="60" cy="60" r={r} fill="none"
-                  stroke={remaining === 0 ? 'var(--legs)' : 'var(--pull)'}
-                  strokeWidth="6"
-                  strokeDasharray={circ}
-                  strokeDashoffset={offset}
-                  strokeLinecap="round"
-                  style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.3s' }}
-                />
-              </svg>
-              <div style={styles.ringCenter}>
-                <span style={styles.timerNum}>{fmt(remaining)}</span>
+              <BigRing remaining={t.remaining} duration={t.duration} color={color} />
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {PRESETS.map(p => (
+                  <button
+                    key={p}
+                    className="btn btn-sm btn-ghost"
+                    style={{
+                      borderColor: t.duration === p ? color : 'transparent',
+                      border: `1px solid ${t.duration === p ? color : 'var(--border)'}`,
+                      color: t.duration === p ? color : 'var(--muted2)',
+                    }}
+                    onClick={() => t.setDuration(p)}
+                  >
+                    {p}s
+                  </button>
+                ))}
               </div>
-            </div>
 
-            {/* Adjust */}
-            <div style={styles.adjustRow}>
-              <button className="btn btn-ghost btn-sm" onClick={() => adjust(-15)}>−15s</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => adjust(+15)}>+15s</button>
-            </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => t.adjust(-15)}>−15s</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => t.adjust(+15)}>+15s</button>
+              </div>
 
-            {/* Controls */}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={reset}>Reset</button>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 2, background: remaining === 0 ? 'var(--legs)' : undefined }}
-                onClick={startPause}
-              >
-                {remaining === 0 ? 'Done ✓' : running ? 'Pause' : 'Start'}
+              <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={t.reset}>Reset</button>
+                <button
+                  className="btn btn-primary"
+                  style={{ flex: 2, background: t.finished ? 'var(--legs)' : undefined, color: t.finished ? '#fff' : undefined }}
+                  onClick={t.finished ? t.reset : t.toggle}
+                >
+                  {t.finished ? 'Done ✓' : t.running ? 'Pause' : 'Start'}
+                </button>
+              </div>
+
+              <label className="toggle-row">
+                <span>
+                  Auto-start after each set
+                  <em>Starts this timer the moment you log a set.</em>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={t.autoStartEnabled}
+                  onChange={e => t.setAutoStart(e.target.checked)}
+                />
+              </label>
+
+              <button className="btn btn-ghost" style={{ width: '100%' }} onClick={() => setOpen(false)}>
+                Close
               </button>
             </div>
           </div>
@@ -113,92 +124,27 @@ export default function RestTimer() {
   )
 }
 
-const styles = {
-  fab: {
-    position: 'fixed',
-    bottom: 'calc(72px + 16px + var(--safe-bot))',
-    right: '16px',
-    width: 52,
-    height: 52,
-    borderRadius: '50%',
-    background: 'var(--surface2)',
-    border: '1px solid var(--border)',
-    color: 'var(--muted2)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    zIndex: 50,
-    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-    flexDirection: 'column',
-    gap: 2,
-    WebkitTapHighlightColor: 'transparent',
-  },
-  fabBadge: {
-    fontSize: 9,
-    fontFamily: 'var(--font-mono)',
-    color: 'var(--pull)',
-    lineHeight: 1,
-  },
-  overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(0,0,0,0.7)',
-    zIndex: 200,
-    display: 'flex',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  sheet: {
-    background: 'var(--surface)',
-    borderRadius: '20px 20px 0 0',
-    border: '1px solid var(--border)',
-    borderBottom: 'none',
-    padding: '16px 24px',
-    paddingBottom: 'calc(40px + 80px + env(safe-area-inset-bottom, 0px))',
-    width: '100%',
-    maxWidth: 480,
-    maxHeight: 'calc(100dvh - 60px)',
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 20,
-    boxSizing: 'border-box',
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    background: 'var(--border)',
-    marginBottom: 4,
-  },
-  title: {
-    fontFamily: 'var(--font-head)',
-    fontSize: 22,
-    letterSpacing: '0.06em',
-    color: 'var(--text)',
-  },
-  ringWrap: {
-    position: 'relative',
-    width: 120,
-    height: 120,
-  },
-  ringCenter: {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  timerNum: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: 28,
-    fontWeight: 500,
-    color: 'var(--text)',
-  },
-  adjustRow: {
-    display: 'flex',
-    gap: 10,
-  },
+function BigRing({ remaining, duration, color }) {
+  const r = 46
+  const circ = 2 * Math.PI * r
+  const pct = duration > 0 ? Math.min(1, remaining / duration) : 0
+  return (
+    <div style={{ position: 'relative', width: 124, height: 124 }}>
+      <svg width="124" height="124" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="62" cy="62" r={r} fill="none" stroke="var(--surface3)" strokeWidth="6" />
+        <circle
+          cx="62" cy="62" r={r} fill="none"
+          stroke={color} strokeWidth="6" strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - pct)}
+          style={{ transition: 'stroke-dashoffset 0.25s linear, stroke 0.3s' }}
+        />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 30, fontWeight: 500, color: 'var(--text)' }}>
+          {fmt(remaining)}
+        </span>
+      </div>
+    </div>
+  )
 }
